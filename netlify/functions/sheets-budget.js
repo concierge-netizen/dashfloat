@@ -3,7 +3,7 @@
 // Endpoint: GET /.netlify/functions/sheets-budget
 
 const GS_ID  = '1NA2EGqfg-2f-5ZXgHLpND0MKkClDwOAJVF7Zpc-yfKk';
-const GS_KEY = 'AIzaSyCMo4o1MarAWRnV0Y95hy0pLDDwdOUutXM';
+const GS_KEY = process.env.GOOGLE_SHEETS_API_KEY || '';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -12,6 +12,13 @@ const CORS = {
 };
 
 exports.handler = async function(event) {
+  if (!process.env.GOOGLE_SHEETS_API_KEY) {
+    return {
+      statusCode: 500,
+      headers: CORS,
+      body: JSON.stringify({ error: 'GOOGLE_SHEETS_API_KEY environment variable not set in Netlify' })
+    };
+  }
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers: CORS, body: '' };
 
   // Try sheet names in order — handles renamed tabs
