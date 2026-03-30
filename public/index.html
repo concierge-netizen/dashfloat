@@ -348,7 +348,7 @@ const BOARD=4550650855;
 const GS_ID='1NA2EGqfg-2f-5ZXgHLpND0MKkClDwOAJVF7Zpc-yfKk';
 const GS_KEY='AIzaSyCMo4o1MarAWRnV0Y95hy0pLDDwdOUutXM';
 const GS_SHEET='Monthly Budget';
-const GS_URL=`https://sheets.googleapis.com/v4/spreadsheets/${GS_ID}/values/${encodeURIComponent(GS_SHEET+'!A1:O85')}?key=${GS_KEY}&valueRenderOption=UNFORMATTED_VALUE`;
+const GS_URL='/.netlify/functions/sheets-budget'; // server-side proxy — avoids CORS & key restriction issues
 
 const CMAP={'GHOST Beverage':'GHOST Beverage / Next Wave Beverages','GHOST Beverages LLC':'GHOST Beverage / Next Wave Beverages','GHOST':'GHOST Beverage / Next Wave Beverages','Campari':'Campari America','Campari America':'Campari America','MHUSA':'Moet Hennessy USA','Bacardi':'Bacardi USA','Alps Beverages':'Alps Beverages','SAHARA':'SAHARA Las Vegas','Stadium Swim':'Stadium Swim / Aperol'};
 const PMAP={'Delivery':'Logistics and Deliveries','Activation':'Activation Logistics','I/O Shipping':'Inbound Service','Production':'Production Services','Sourcing':'Custom Logistics'};
@@ -373,52 +373,20 @@ async function syncSheets(){
   lbl.innerHTML='Syncing with <strong>Google Sheets</strong>…';
   try{
     const r=await fetch(GS_URL);
-    if(!r.ok) throw new Error(`HTTP ${r.status} — check sheet is shared publicly`);
+    if(!r.ok){
+      const errText=await r.text();
+      let errJson={};
+      try{errJson=JSON.parse(errText);}catch(_){}
+      throw new Error(errJson.error||errJson.detail||`HTTP ${r.status}`);
+    }
     const j=await r.json();
-    const rows=j.values||[];
+    if(!j.ok) throw new Error(j.error||'Unknown error from budget proxy');
 
-    // Helper: get numeric value at 0-indexed row, col B=1, col C=2 (Jan values)
-    const n=(rowIdx,colIdx=2)=>{
-      const row=rows[rowIdx];
-      if(!row) return 0;
-      const v=row[colIdx];
-      return v!==undefined&&v!==''&&v!==null ? (parseFloat(v)||0) : 0;
-    };
-
-    // Row indices are 0-based (row 1 in sheets = index 0)
-    // Revenue rows 6-16 in sheet = indices 5-15
-    const ghost  = n(5);   // Revenue – GHOST
-    const wgs    = n(6);   // Revenue – WG&S
-    const campari= n(7);   // Revenue – Campari
-    const titos  = n(8);   // Revenue – Tito's
-    const patron = n(9);   // Revenue – Patron
-    const mhusa  = n(10);  // Revenue – MHUSA
-    const activ  = n(11);  // Revenue – Activation
-    const prod   = n(12);  // Revenue – Production
-    const deliv  = n(13);  // Revenue – Delivery
-    const totalRev = n(15) || (ghost+wgs+campari+titos+patron+mhusa+activ+prod+deliv);
-    const retainerRev = ghost+wgs+campari+titos+patron+mhusa;
-    const adhocRev = activ+prod+deliv;
-
-    // COGS row 26 = index 25
-    const cogs = n(25) || n(19); // TOTAL COGS or Labor-CL fallback
-
-    // Gross profit row 27 = index 26
-    const gp = n(26) || (totalRev - cogs);
-    const gpPct = totalRev>0 ? gp/totalRev : 0;
-
-    // SG&A rows 32-73
-    const insurance = n(31)+n(32)+n(33)+n(34)+n(35)+n(36);
-    const rent      = n(39);
-    const utilities = n(44)+n(46)+n(47);  // NV Energy + comms
-    const software  = n(49)+n(50)+n(51)+n(52)+n(53)+n(54);
-    const autoLoans = n(57)+n(58)+n(59);
-    const fuel      = n(60)+n(61)+n(62)+n(63)+n(64);
-    const debt      = n(66)+n(67)+n(68)+n(69);
-    const other     = n(38)+n(55)+n(71); // office, adv, contingency
-    const totalSGA  = n(72) || (insurance+rent+utilities+software+autoLoans+fuel+debt+other);
-    const ebit      = n(75) || (gp - totalSGA);
-    const breakeven = gpPct>0 ? Math.ceil(totalSGA/gpPct/500)*500 : 39000;
+    // Parse pre-computed budget from proxy
+    const bud=j.budget;
+    const {totalRev,retainerRev,adhocRev,cogs,gp,gpPct,totalSGA,ebit,breakeven,
+           rent,autoLoans,debt,software,insurance,utilities,fuel} = bud;
+    const other = bud.other||0;
 
     // Store in global budget object
     budget={totalRev,retainerRev,adhocRev,cogs,gp,gpPct,totalSGA,ebit,breakeven,rent,autoLoans,debt,software,insurance,utilities,fuel,other};
@@ -801,7 +769,9 @@ function dlCSV(){
 
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeInv(); });
 window.addEventListener('DOMContentLoaded',()=>{
-  // Fire both syncs in parallel on load
+  // Render defaults immediately so financial panels are visible
+  updateBudgetDOM(budget);
+  // Then fire live syncs
   setTimeout(()=>{ syncSheets(); syncAll(); }, 400);
 });
 </script>
